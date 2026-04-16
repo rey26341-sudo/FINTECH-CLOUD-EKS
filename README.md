@@ -184,6 +184,26 @@ kubectl get services
 
 ---
 
+## 🚀 Project Overview
+A containerized fintech API deployed using Kubernetes with CI pipeline automation.
+
+## 🛠️ Tech Stack
+- Docker
+- Kubernetes (Minikube)
+- GitHub Actions
+
+## ⚙️ CI Pipeline
+- Trigger: push to main
+- Builds Docker image automatically
+
+## 📸 Proof
+<img width="1920" height="1020" alt="Screenshot 2026-04-15 162644" src="https://github.com/user-attachments/assets/219e49d6-3066-4e83-87c2-2e8acb15ac66" />
+<img width="1641" height="1020" alt="Screenshot 2026-04-16 171420" src="https://github.com/user-attachments/assets/fbe2e068-68a1-470b-930c-d7a6af5048af" />
+<img width="1625" height="1020" alt="Screenshot 2026-04-16 170706" src="https://github.com/user-attachments/assets/3564f8af-b19e-414d-8f67-026e6e7457e3" />
+<img width="1898" height="983" alt="Screenshot 2026-04-15 162721" src="https://github.com/user-attachments/assets/a9431835-5618-4d20-981d-7035d1cfab5b" />
+
+
+
 ## 👩‍💻 Author
 
 **Rey** — DevOps & Cloud Engineer | Cybersecurity Enthusiast
@@ -195,6 +215,6 @@ kubectl get services
 
 This project is open source and available under the [MIT License](LICENSE).
 
----
+
 
 > *Built as part of a DevOps & Multicloud Architecture portfolio — demonstrating real-world deployment pipelines for financial technology systems.*

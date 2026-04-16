@@ -1,0 +1,18 @@
+# Terraform
+infra/.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Environment files
+.env
+
+# System files
+.DS_Store
+# Binaries
+kubectl
+minikube-linux-amd64

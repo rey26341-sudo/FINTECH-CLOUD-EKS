@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fintech-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fintech
+  template:
+    metadata:
+      labels:
+        app: fintech
+    spec:
+      containers:
+      - name: fintech-container
+        image: fintech-app:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 5000

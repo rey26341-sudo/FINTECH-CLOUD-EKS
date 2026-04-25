@@ -1,20 +1,36 @@
 apiVersion: apps/v1
 kind: Deployment
+
 metadata:
   name: fintech-deployment
+  labels:
+    app: fintech
+
 spec:
   replicas: 2
+
   selector:
     matchLabels:
       app: fintech
+
   template:
     metadata:
       labels:
         app: fintech
+
     spec:
       containers:
       - name: fintech-container
         image: rey26341/fintech-app:latest
-         imagePullPolicy: Always
+        imagePullPolicy: Always
+
         ports:
         - containerPort: 5000
+
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "250m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"

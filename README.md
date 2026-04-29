@@ -10,7 +10,8 @@
 ![Python](https://img.shields.io/badge/Python-Flask-3776AB?style=flat-square&logo=python)
 ![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-2088FF?style=flat-square&logo=githubactions)
 
----
+<img width="1440" height="1240" alt="image" src="https://github.com/user-attachments/assets/d8e0e3ca-16c1-4725-acb8-09c70abf89d2" />
+
 
 ## 📋 Table of Contents
 

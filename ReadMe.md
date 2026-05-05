@@ -57,8 +57,6 @@
 
 ---
 
-## 🏦 Why Fintech?
-
 Fintech systems have uniquely demanding requirements that make them the perfect proving ground for DevOps practices:
 
 - **High availability** — downtime means financial loss; even seconds of outage affects transactions
@@ -66,8 +64,6 @@ Fintech systems have uniquely demanding requirements that make them the perfect 
 - **Traffic spikes** — payment systems and trading platforms experience sudden surges requiring autoscaling
 - **Auditability** — every deployment, every change must be traceable via CI/CD pipelines and logs
 - **Monitoring** — pod health, API latency, and error rates must be tracked continuously
-
-This project simulates a fintech API deployed with production-grade practices: autoscaling, health checks, CI/CD pipelines, and zero-downtime deployment design — making it domain-aware in a way that is rare for entry-level DevOps portfolios.
 
 ---
 

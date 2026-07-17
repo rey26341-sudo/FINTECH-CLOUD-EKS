@@ -737,3 +737,216 @@ Terraform:       via snap (19 EKS resources)
 EKS (eksctl):    Kubernetes 1.34 — node v1.34.4-eks-f69f56f
 EKS (Terraform): Kubernetes 1.29 — node v1.29.15-eks-ecaa3a6
 ```
+
+
+REOPENING FINTECH- **CLUSTER CONNECTIVITY ISSUE** ON (17/07/2026)
+
+```text
+The connection to the server 127.0.0.1:32771 was refused
+```
+This means **kubectl cannot reach Kubernetes API server**. Until that's fixed, cannot install Prometheus, Grafana, or any other Kubernetes resource.
+
+## Check your current kubectl context
+
+```bash
+kubectl config current-context
+```
+```bash
+kubectl config get-contexts
+```
+
+## Check whether your cluster still exists
+
+Since this is  **FINTECH-CLOUD-EKS** project, but i cannot use Amazon EKS,my account got permantently closed.but i am trying to test my scripts!
+
+```bash
+aws eks list-clusters
+```
+```bash
+aws sts get-caller-identity
+```
+
+## Check your kubeconfig
+
+```bash
+kubectl config view
+```
+
+The address:
+
+```
+https://127.0.0.1:32771
+```
+
+is **not a normal Amazon EKS API endpoint**.
+
+An EKS cluster normally uses an endpoint like:
+
+```
+https://XXXXXXXX.gr7.ap-south-1.eks.amazonaws.com
+```
+
+Seeing `127.0.0.1:32771` suggests one of these situations:
+
+* connected to a **local Kubernetes cluster** (Docker Desktop, kind, minikube, etc.) that is no longer running.
+* `kubeconfig` is pointing to an outdated or invalid context.
+* The EKS kubeconfig needs to be refreshed.
+
+---
+
+### Before we install Prometheus
+
+Let's first restore access to your cluster.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+You actually have **two separate issues**.
+
+## Issue 1: connected to Minikube (not EKS)
+
+Your current context is:
+
+```text
+CURRENT   NAME
+*         minikube
+```
+
+and Minikube's API server is:
+
+```text
+https://127.0.0.1:32771
+```
+
+That server is no longer running, which is why you get:
+
+```text
+The connection to the server 127.0.0.1:32771 was refused
+```
+
+So `kubectl` is trying to talk to a stopped Minikube cluster.
+
+---
+
+## Issue 2: AWS credentials have expired
+
+These errors:
+
+```text
+InvalidClientTokenId
+
+UnrecognizedClientException
+```
+
+mean AWS CLI cannot authenticate anymore.Even if switching to your EKS context, authentication will fail until i configure valid AWS credentials again because EKS uses the AWS CLI to obtain authentication tokens. i have to decide which environmemnts i can use?
+
+# We need to decide which environment you're usi
+
+Your FINTECH-CLOUD-EKS repository can be developed in either environment:
+
+### Option A — Continue on Minikube (recommended for now)
+
+Pros:
+
+* Free
+* No AWS charges
+* Perfect for learning Prometheus, Grafana, HPA, etc.
+
+We'll simply restart Minikube.
+
+---
+
+### Option B — Continue on Amazon EKS
+
+Pros:
+
+* Production-like
+* Looks great on a resume
+
+But first you'll need to:
+
+* restore your AWS credentials
+* verify the cluster still exists
+* possibly recreate the cluster if it was deleted
+
+---
+
+## I recommend Option A
+
+Since we're adding monitoring features, Minikube is completely sufficient.
+
+First, check whether Minikube is installed:
+
+```bash
+minikube status
+```
+
+If it's stopped:
+
+```bash
+minikube start
+```
+
+Then verify:
+
+```bash
+kubectl get nodes
+```
+
+If that works, we'll install:
+
+* Metrics Server
+* Helm
+* Prometheus
+* Grafana
+
+without spending anything on AWS.
+
+---
+
+## We can move everything to EKS later
+
+Once the monitoring stack works locally, we can deploy the exact same Kubernetes manifests to EKS after your AWS credentials are working again.
+
+That mirrors a common real-world workflow: develop and test locally, then deploy to a cloud cluster.
+
+### Next step
+
+Run:
+
+```bash
+minikube status
+```
+
+If it reports the cluster is stopped, run:
+
+```bash
+minikube start
+```
+
+Then share the output of:
+
+```bash
+kubectl get nodes
+```
+
+We'll continue installing the monitoring stack from there.
+

@@ -1,0 +1,6 @@
+api-service/venv/
+.env
+*.pem
+terraform.tfstate
+__pycache__/
+*.pyc

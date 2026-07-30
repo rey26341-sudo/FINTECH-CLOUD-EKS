@@ -15,9 +15,11 @@
 ## 📋 Table of Contents
 
 - [Project Overview](#project-overview)
+- [Architecture](#-architecture)
 - [Why Fintech?](#-why-fintech)
 - [Tech Stack](#tech-stack)
 - [Repository Structure](#repository-structure)
+- [API Reference](#-api-reference)
 - [Phase 1 — System Setup & AWS CLI](#phase-1--system-setup--aws-cli)
 - [Phase 2 — Application & Docker](#phase-2--application--docker)
 - [Phase 3 — Amazon ECR](#phase-3--amazon-ecr)
@@ -27,7 +29,7 @@
 - [Phase 7 — GitHub Actions CI/CD](#phase-7--github-actions-cicd)
 - [Phase 8 — Minikube Local Testing](#phase-8--minikube-local-testing)
 - [Phase 9 — Blockchain Settlement Layer (Ethereum Sepolia)](#phase-9--blockchain-settlement-layer-ethereum-sepolia)
-- [Production Readiness](#-production-readiness)
+- [Reliability & Production Hardening](#-reliability--production-hardening)
 - [Monitoring Strategy](#-monitoring-strategy)
 - [Testing Strategy](#-testing-strategy)
 - [Performance Metrics & Cost Analysis](#-performance-metrics--cost-analysis)
@@ -61,6 +63,49 @@
 - **Terraform path** → `fintech-eks` — Kubernetes 1.29, 19 resources created
 
 **Beyond infrastructure**, the API now performs real on-chain settlement: `POST /invoice` signs and broadcasts an actual transaction to Ethereum Sepolia and returns the transaction hash, verifiable on Etherscan.
+
+---
+
+## 🏗 Architecture
+
+```mermaid
+flowchart TD
+    Client[Client / curl / Postman] -->|HTTPS| LB[AWS ELB<br/>LoadBalancer Service]
+    LB --> Pod1[Flask Pod 1]
+    LB --> Pod2[Flask Pod 2]
+
+    subgraph EKS["AWS EKS Cluster - ap-south-1"]
+        Pod1
+        Pod2
+        HPA[HorizontalPodAutoscaler<br/>2-5 replicas, 60% CPU] -.scales.-> Pod1
+        HPA -.scales.-> Pod2
+    end
+
+    Pod1 --> Routes[routes/invoice.py<br/>routes/health.py]
+    Pod2 --> Routes
+    Routes --> Interface[blockchain/interface.py<br/>chain-agnostic layer]
+    Interface --> EthModule[blockchain/ethereum/<br/>web3_client · wallet · transaction]
+    EthModule -->|JSON-RPC HTTPS| Alchemy[Alchemy RPC Provider]
+    Alchemy --> Sepolia[(Ethereum Sepolia<br/>Testnet)]
+
+    ECR[Amazon ECR<br/>fintech-api image] -->|IAM role pull| Pod1
+    ECR -->|IAM role pull| Pod2
+
+    GHA[GitHub Actions<br/>deploy.yml] -->|build & push| ECR
+    GHA -->|kubectl apply| EKS
+
+    style Sepolia fill:#3C3C3D,color:#fff
+    style EKS fill:#232F3E,color:#fff
+    style Interface fill:#326CE5,color:#fff
+```
+
+**Request flow for `POST /invoice`:**
+1. Client sends a JSON payload (`to_address`, `amount`, optional `chain`) to the load-balanced Flask service
+2. `routes/invoice.py` validates input and calls `blockchain/interface.py`
+3. `interface.py` routes the call to the correct chain module — currently `blockchain/ethereum/`
+4. `transaction.py` builds, signs (locally, using the wallet's private key), and broadcasts the transaction via the Alchemy RPC endpoint
+5. Sepolia confirms the transaction; the API returns `{"status": "sent", "tx_hash": "0x..."}`
+6. The transaction is independently verifiable on `sepolia.etherscan.io`
 
 ---
 
@@ -144,6 +189,90 @@ FINTECH-CLOUD-EKS/
 
 ---
 
+## 📡 API Reference
+
+### `GET /health`
+
+Simple liveness check — used by Kubernetes liveness/readiness probes.
+
+**Request:**
+```bash
+curl http://localhost:5000/health
+```
+
+**Response — `200 OK`:**
+```json
+{"status": "healthy"}
+```
+
+### `GET /`
+
+**Request:**
+```bash
+curl http://localhost:5000/
+```
+
+**Response — `200 OK`:**
+```
+fintech API is running
+```
+
+### `POST /invoice`
+
+Signs and broadcasts a real transaction on the specified chain (currently only `ethereum` / Sepolia is supported), returning the transaction hash.
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/invoice \
+  -H "Content-Type: application/json" \
+  -d '{
+        "to_address": "0x822Afd3C5864e39C383e480871952705aBf15EE5",
+        "amount": 0.0001,
+        "chain": "ethereum"
+      }'
+```
+
+| Field         | Type    | Required | Notes                                              |
+| ------------- | ------- | -------- | --------------------------------------------------- |
+| `to_address`  | string  | ✅        | Valid checksummed Ethereum address                   |
+| `amount`      | number  | ✅        | Amount in ETH (e.g. `0.0001`)                         |
+| `chain`       | string  | ❌        | Defaults to `"ethereum"`. Only value currently supported |
+
+**Response — `200 OK`:**
+```json
+{
+  "status": "sent",
+  "tx_hash": "0x1962c53b6a6d97a195fd67dd0a8fe94033b2b5b7e54821fe31bad6a77c86e989"
+}
+```
+
+**Response — `400 Bad Request`** (missing fields or unsupported chain):
+```json
+{"error": "to_address and amount are required"}
+```
+```json
+{"error": "Unsupported chain: solana"}
+```
+
+**Response — `500 Internal Server Error`** (transaction failed — e.g. insufficient gas):
+```json
+{
+  "error": "transaction failed",
+  "details": "insufficient funds for gas * price + value"
+}
+```
+
+Verified live example: `sepolia.etherscan.io/tx/0x1962c53b6a6d97a195fd67dd0a8fe94033b2b5b7e54821fe31bad6a77c86e989`
+
+### Planned endpoints
+
+| Endpoint                    | Method | Purpose                                             | Status  |
+| ----------------------------- | ------ | ------------------------------------------------------ | -------- |
+| `/transaction/status/<tx_hash>` | GET    | Check confirmation status of a previously sent tx      | Planned |
+| `/balance`                     | GET    | Return current wallet balance                          | Planned |
+
+---
+
 ## Phase 1 — System Setup & AWS CLI
 
 ```bash
@@ -192,6 +321,8 @@ docker build -t fintech-api .
 docker run -d -p 5000:5000 fintech-api
 # Browser: localhost:5000 → "fintech API is running" ✅
 ```
+
+> ⚠️ **On image tags:** the commands below build/run with an implicit `:latest` tag for local iteration. `:latest` is fine for local dev but is **never used in the deploy pipeline** — see [Phase 7](#phase-7--github-actions-cicd) for immutable, git-SHA-based tagging used in CI/CD and Kubernetes manifests.
 
 ---
 
@@ -270,7 +401,8 @@ spec:
     spec:
       containers:
       - name: fintech-container
-        image: [ACCOUNT-ID].dkr.ecr.ap-south-1.amazonaws.com/fintech-api:latest
+        # ⚠️ use an immutable tag (git SHA), never :latest — see note below
+        image: [ACCOUNT-ID].dkr.ecr.ap-south-1.amazonaws.com/fintech-api:${GIT_SHA}
         ports:
         - containerPort: 5000
         resources:
@@ -317,6 +449,8 @@ kubectl get pods    # 2 replicas Running
 kubectl get svc     # LoadBalancer external IP assigned
 ```
 
+> **Why not `:latest` in the manifest?** `:latest` is mutable — a new push silently changes what "latest" points to, so `kubectl rollout restart` can pull an unexpected image, and rollbacks become guesswork. Tagging by Git commit SHA (`fintech-api:a1b2c3d`) makes every deployment traceable to an exact commit and every rollback deterministic (`kubectl set image deployment/fintech-deployment fintech-container=...:<previous-sha>`).
+
 > **Secrets in Kubernetes:** once `/invoice` is deployed to EKS, `WALLET_PRIVATE_KEY` must be injected as a Kubernetes `Secret`, not baked into the image or a plain ConfigMap. See [Security Considerations](#-security-considerations).
 
 ---
@@ -348,19 +482,24 @@ jobs:
           docker login --username AWS --password-stdin \
             [ACCOUNT-ID].dkr.ecr.ap-south-1.amazonaws.com
 
-      - name: Build & Tag & Push
+      - name: Build & Tag & Push (immutable tag)
         run: |
+          IMAGE_TAG=${GITHUB_SHA::8}
           docker build -t fintech-api ./api-service
           docker tag fintech-api:latest \
-            [ACCOUNT-ID].dkr.ecr.ap-south-1.amazonaws.com/fintech-api:latest
+            [ACCOUNT-ID].dkr.ecr.ap-south-1.amazonaws.com/fintech-api:$IMAGE_TAG
           docker push \
-            [ACCOUNT-ID].dkr.ecr.ap-south-1.amazonaws.com/fintech-api:latest
+            [ACCOUNT-ID].dkr.ecr.ap-south-1.amazonaws.com/fintech-api:$IMAGE_TAG
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --region ap-south-1 --name reluna-cluster
 
       - name: Deploy to Kubernetes
-        run: kubectl apply -f api-service/k8s/
+        run: |
+          kubectl set image deployment/fintech-deployment \
+            fintech-container=[ACCOUNT-ID].dkr.ecr.ap-south-1.amazonaws.com/fintech-api:${{ env.IMAGE_TAG }}
+          kubectl apply -f api-service/k8s/
 ```
 
 **GitHub Secrets required:**
@@ -526,7 +665,9 @@ This confirms the Flask API genuinely signs and broadcasts real transactions to 
 
 ---
 
-## 🚀 Production Readiness
+## 🚀 Reliability & Production Hardening
+
+*(Renamed from "Production Readiness" — the checklist below reflects hardening already applied plus what's explicitly still open, rather than implying the system is fully production-certified.)*
 
 ### ✅ Health Checks
 
@@ -577,6 +718,16 @@ kubectl get hpa  # watch scaling events
 
 All pods have explicit CPU and memory requests + limits — prevents a misbehaving pod from starving other workloads on the node.
 
+### ✅ Immutable Image Tags
+
+Deploy pipeline tags images with the Git commit SHA rather than `:latest` (see [Phase 7](#phase-7--github-actions-cicd)) — every deployed image is traceable to an exact commit, and rollbacks are deterministic.
+
+### ⚠️ Not Yet Hardened
+
+- Container image is not yet scanned for vulnerabilities pre-deploy (see [Roadmap](#-roadmap) — Docker security scan)
+- No persistent transaction ledger — settled invoices exist only as on-chain data + application logs, not in a queryable database (see Roadmap — PostgreSQL)
+- No transaction status polling/reconciliation endpoint yet
+
 ---
 
 ## 📊 Monitoring Strategy
@@ -589,14 +740,14 @@ In production this project would use Prometheus + Grafana for full observability
 | **Grafana**       | Dashboards for real-time visualisation                      |
 | **CloudWatch**    | AWS-native — EKS control plane logs, EC2 node metrics       |
 
-**Key metrics tracked:**
+**Key metrics tracked (once Prometheus is wired in — see Roadmap):**
 
 - CPU and memory usage per pod
 - Pod restart count (early warning for crashes)
 - API latency (p50, p95, p99)
 - HTTP error rate (4xx, 5xx)
 - Replica count over time (shows HPA scaling events)
-- **On-chain metrics** *(planned)* — transaction confirmation time, failed-transaction rate, gas price at broadcast time
+- On-chain metrics — transaction confirmation time, failed-transaction rate, gas price at broadcast time
 
 Prometheus can be deployed to the cluster via Helm:
 ```bash
@@ -715,13 +866,14 @@ Results validate:
 - ✅ **`WALLET_PRIVATE_KEY` is never hardcoded** — loaded exclusively via `python-dotenv` from a local `.env` file
 - ✅ **`.env` is git-ignored** and confirmed absent from both the working tree and commit history before every push
 - ✅ **Testnet-only wallet** — the private key in use controls a Sepolia-only wallet with no real-world value, isolated from any mainnet wallet
-- ⚠️ **Planned for EKS deployment:** `WALLET_PRIVATE_KEY` must move to a Kubernetes `Secret` (or AWS Secrets Manager, mounted via CSI driver) before this service runs in the cluster — it currently only exists in local `.env`, which does not survive into the container image or pod spec unless explicitly wired, and should stay that way
+- ⚠️ **Planned for EKS deployment:** `WALLET_PRIVATE_KEY` must move to a Kubernetes `Secret` (or AWS Secrets Manager, mounted via CSI driver) before this service runs in the cluster — see Roadmap
 
 ### Container Security
 
 - ✅ **Official base image** — `python:3.11` from Docker Hub with regular upstream security patches
 - ✅ **ECR image encryption** — AES256 encryption at rest
 - ✅ **Container isolation** — each pod runs in its own network namespace via Kubernetes CNI (vpc-cni addon)
+- ⚠️ **No automated vulnerability scan yet** — see Roadmap (Docker security scan)
 
 ### Secrets Management
 
@@ -734,16 +886,6 @@ aws configure  # and commit ~/.aws/credentials to git
 # Or use AWS Secrets Manager / Parameter Store for app-level secrets
 # For wallet keys specifically: Kubernetes Secret, never a ConfigMap
 ```
-
-### Recommended Additions for Full Production
-
-- [ ] Enable ECR image scanning on push (`scanOnPush: true`)
-- [ ] Add Kubernetes Network Policies to restrict pod-to-pod traffic
-- [ ] Enable EKS CloudWatch logging for audit trail
-- [ ] Use AWS Secrets Manager for app credentials (not env vars)
-- [ ] Add Trivy or Snyk to CI pipeline for container vulnerability scanning
-- [ ] Move `WALLET_PRIVATE_KEY` from `.env` to a Kubernetes Secret before any cluster deployment of the blockchain-enabled API
-- [ ] Add rate limiting / request validation on `POST /invoice` before any public exposure — currently accepts any `to_address` and `amount` without spend limits
 
 ---
 
@@ -769,6 +911,7 @@ aws configure  # and commit ~/.aws/credentials to git
 | **ReplicaSet**             | Automatically recreates failed pods to maintain desired count         |
 | **Multi-AZ nodes**         | Node failure in one AZ doesn't take down all pods                     |
 | **On-chain error handling**| `/invoice` catches both invalid-input (`ValueError` → 400) and transaction failures (insufficient gas, RPC errors → 500 with detail) rather than crashing unhandled |
+| **Immutable deploys**      | Git-SHA image tags make every rollout and rollback deterministic       |
 
 ---
 
@@ -920,6 +1063,8 @@ python3 -c "from blockchain.ethereum.wallet import get_balance; print(get_balanc
 | GitHub Actions CI #4      | Actions tab                                                                                    | ✅ Success — 41s              |
 | **Sepolia settlement**    | `sepolia.etherscan.io/tx/0x1962c53b6a6d97a195fd67dd0a8fe94033b2b5b7e54821fe31bad6a77c86e989` | ✅ Success — block 11380376   |
 
+<img width="1920" height="1020" alt="image" src="https://github.com/user-attachments/assets/ce495441-7a18-4797-ba7e-3bb0a5cf2153" />
+
 ---
 
 ## Versions
@@ -946,14 +1091,28 @@ Blockchain:      Ethereum Sepolia (chain ID 11155111) via Alchemy RPC
 
 ## 🗺️ Roadmap
 
-- [ ] `GET /transaction/status` — check confirmation status of a settled invoice by tx hash
+### Priority 1 — Documentation & Immediate Hygiene
+- [x] Architecture diagram
+- [x] API reference with request/response examples
+- [x] Rename "Production Readiness" → "Reliability & Production Hardening"
+- [x] Replace mutable `:latest` Docker tag with immutable git-SHA tags in CI/CD and manifests
+
+### Priority 2 — Core Functionality
+- [ ] **PostgreSQL transaction database** — persist every invoice/transaction (request payload, tx hash, status, timestamps) in a queryable table instead of relying solely on on-chain data and logs. Enables reconciliation, reporting, and audit trails.
+- [ ] **`GET /transaction/status/<tx_hash>`** — poll Sepolia for confirmation status of a previously sent transaction; pairs naturally with the PostgreSQL ledger above (update stored status on each poll)
+- [ ] **Docker security scan** — add Trivy or Snyk to the CI pipeline (`ci.yml`) to scan the built image for known CVEs before it's pushed to ECR
+
+### Priority 3 — Advanced Observability & Secrets
+- [ ] **Prometheus metrics** — expose `/metrics` from Flask (via `prometheus-flask-exporter` or similar); track request latency, error rate, and custom on-chain metrics (tx success rate, gas price at broadcast)
+- [ ] **Grafana dashboard** — visualise the above metrics plus HPA scaling events and pod health in one view
+- [ ] **AWS Secrets Manager integration** — move `WALLET_PRIVATE_KEY` and `SEPOLIA_RPC_URL` out of `.env`/Kubernetes Secrets and into AWS Secrets Manager, mounted via the Secrets Store CSI driver, for centralized rotation and access auditing
+
+### Other open items
 - [ ] `GET /balance` — expose wallet balance via API rather than the Python shell
 - [ ] Consolidate duplicate `config.py` files (root + `api-service/`) into one shared module
 - [ ] Add `blockchain/polygon/` following the same pattern as `blockchain/ethereum/`, wired through `interface.py`
-- [ ] Wire `WALLET_PRIVATE_KEY` and `SEPOLIA_RPC_URL` into a Kubernetes Secret for cluster deployment
 - [ ] Unit tests for `blockchain/interface.py` with a mocked web3 provider
 - [ ] Request validation and spend limits on `POST /invoice`
-- [ ] Prometheus metrics for on-chain transaction success rate and confirmation latency
 
 ---
 

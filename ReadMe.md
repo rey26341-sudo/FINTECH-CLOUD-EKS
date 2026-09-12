@@ -316,13 +316,10 @@ flowchart TD
 
     subgraph EKS["AWS EKS Cluster - ap-south-1"]
         Pod1
-        Pod2
         HPA[HorizontalPodAutoscaler<br/>2-5 replicas, 60% CPU] -.scales.-> Pod1
-        HPA -.scales.-> Pod2
     end
 
     Pod1 --> Routes[routes/invoice.py<br/>routes/health.py]
-    Pod2 --> Routes
     Routes --> Interface[blockchain/interface.py<br/>chain-agnostic layer]
     Interface --> EthModule[blockchain/ethereum/<br/>web3_client · wallet · transaction]
     EthModule -->|JSON-RPC HTTPS| Alchemy[Alchemy RPC Provider]
